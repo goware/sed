@@ -11,10 +11,10 @@ import (
 )
 
 type File struct {
-	FilePath    string // path to file
-	TmpFilePath string // path to tmp file
-	// reader
-	// writer
+	FilePath     string // path to file
+	TmpFilePath  string // path to tmp file
+	Input        *os.File
+	Output       *os.File // tmp file
 	Replacements map[string]struct {
 		Original string
 		New      string
@@ -53,7 +53,8 @@ func (f *File) replace(fromString, toString string, onlyCreateTmpFile bool) (err
 	if err != nil {
 		return err
 	}
-
+	f.Input = input
+	f.Output = output
 	defer func() {
 		if err != nil {
 			input.Close()

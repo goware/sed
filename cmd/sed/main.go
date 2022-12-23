@@ -87,13 +87,16 @@ func main() {
 
 	filesForReplacements := make([]*sed.File, 0)
 
-	panicClosure := func() {
+	panicCleanup := func() {
 		// lets delete tmp files for all files in progress
 		for _, file := range files {
 			if file == nil {
 				continue
 			}
 			if file.TmpFilePath != "" {
+				// ensure that we close all files in case of panic
+				file.Input.Close()
+				file.Output.Close()
 				os.Remove(file.TmpFilePath)
 			}
 		}
@@ -117,7 +120,7 @@ func main() {
 	for {
 		select {
 		case err := <-errChan:
-			panicClosure()
+			panicCleanup()
 			log.Fatal(err)
 		case file := <-fileChan:
 			filesForReplacements = append(filesForReplacements, file)
@@ -125,7 +128,7 @@ func main() {
 		case <-ctx.Done():
 			return
 		case <-sigs:
-			panicClosure()
+			panicCleanup()
 			os.Exit(1)
 		}
 	}
