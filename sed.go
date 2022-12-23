@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 type File struct {
-	FilePath string // path to file
+	FilePath    string // path to file
+	TmpFilePath string // path to tmp file
 	// reader
 	// writer
 	Replacements map[string]struct {
@@ -31,14 +33,23 @@ func NewFile(filePath string, dryRun bool) *File {
 	}
 }
 
-func (f *File) Replace(fromString, toString string) (err error) {
+func (f *File) Replace(fromString, toString string) error {
+	return f.replace(fromString, toString, false)
+}
+
+func (f *File) ReplaceOnlyCreateTmpFile(fromString, toString string) error {
+	return f.replace(fromString, toString, true)
+}
+
+func (f *File) replace(fromString, toString string, onlyCreateTmpFile bool) (err error) {
 	// read file
-	tmpfile := fmt.Sprintf("tmp-sed-%d", time.Now().UnixNano())
+
+	f.TmpFilePath = fmt.Sprintf("%s/tmp-sed-%d", filepath.Dir(f.FilePath), time.Now().UnixNano())
 	input, err := os.OpenFile(f.FilePath, os.O_RDWR, 0777)
 	if err != nil {
 		return err
 	}
-	output, err := os.OpenFile(tmpfile, os.O_RDWR|os.O_CREATE, 0777)
+	output, err := os.OpenFile(f.TmpFilePath, os.O_RDWR|os.O_CREATE, 0777)
 	if err != nil {
 		return err
 	}
@@ -47,19 +58,25 @@ func (f *File) Replace(fromString, toString string) (err error) {
 		if err != nil {
 			input.Close()
 			output.Close()
-			os.Remove(tmpfile)
+			os.Remove(f.TmpFilePath)
 			return
 		}
+		if onlyCreateTmpFile {
+			input.Close()
+			output.Close()
+			return
+		}
+
 		switch f.dryRun {
 		case true:
 			input.Close()
 			output.Close()
-			os.Remove(tmpfile)
+			os.Remove(f.TmpFilePath)
 		case false:
 			input.Close()
 			os.Remove(f.FilePath)
 			output.Close()
-			os.Rename(tmpfile, f.FilePath)
+			os.Rename(f.TmpFilePath, f.FilePath)
 		}
 	}()
 	reader := bufio.NewReader(input)

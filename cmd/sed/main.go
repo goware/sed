@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	"github.com/goware/pp"
 	"github.com/goware/sed"
@@ -55,6 +57,9 @@ func main() {
 	errChan := make(chan error)
 	fileChan := make(chan *sed.File)
 
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
 	for _, file := range files {
 		if file == nil {
 			continue
@@ -63,7 +68,10 @@ func main() {
 		wg.Add(1)
 		go func(fromString, toString string, file *sed.File) {
 			defer wg.Done()
-			err := file.Replace(fromString, toString)
+			// lets only create temp files
+			// when we are sure that we have a happy ending for all files,
+			// we will replace the original file
+			err := file.ReplaceOnlyCreateTmpFile(fromString, toString)
 			if err != nil {
 				errChan <- err
 				return
@@ -77,17 +85,52 @@ func main() {
 		cancel()
 	}()
 
+	filesForReplacements := make([]*sed.File, 0)
+
+	panicClosure := func() {
+		// lets delete tmp files for all files in progress
+		for _, file := range files {
+			if file == nil {
+				continue
+			}
+			if file.TmpFilePath != "" {
+				os.Remove(file.TmpFilePath)
+			}
+		}
+	}
+
+	// happy ending
+	defer func() {
+		for _, file := range filesForReplacements {
+			if file == nil {
+				continue
+			}
+			if *dryRun {
+				os.Remove(file.TmpFilePath)
+				continue
+			}
+			os.Remove(file.FilePath)
+			os.Rename(file.TmpFilePath, file.FilePath)
+		}
+	}()
+
 	for {
 		select {
 		case err := <-errChan:
+			panicClosure()
 			log.Fatal(err)
 		case file := <-fileChan:
+			filesForReplacements = append(filesForReplacements, file)
 			printDiffs(file)
 		case <-ctx.Done():
-			os.Exit(0)
+			return
+		case <-sigs:
+			panicClosure()
+			os.Exit(1)
 		}
 	}
 }
+
 func printDiffs(file *sed.File) {
 	for l, r := range file.Replacements {
 		fmt.Printf("@%s L%s \n", file.FilePath, l)
